@@ -1,38 +1,110 @@
-# This is a basic workflow to help you get started with Actions
+name: Build AndroidGamepad
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "master" branch
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
 
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
+      - name: "Checkout repo"
+        uses: actions/checkout@v3
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
+      - name: "Install system dependencies"
         run: |
-          echo Hello, world!
-          ls
+          sudo apt update
+          sudo apt install -y openjdk-11-jdk unzip wget git g++ libgl-dev python3 cmake ninja-build
 
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
+      - name: Cache Android Tools
+        id: cache-cmdline-tools
+        uses: actions/cache@v3
+        with:
+          path: cmdline-tools
+          key: ${{ runner.os }}-cmdline-tools
+
+      - name: "Install Android SDK|NDK"
+        if: steps.cache-cmdline-tools.outputs.cache-hit != 'true'
         run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+          wget https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
+          echo "2ccbda4302db862a28ada25aa7425d99dce9462046003c1714b059b5c47970d8 commandlinetools-linux-8512546_latest.zip" | sha256sum --check --status
+          unzip commandlinetools-linux-8512546_latest.zip
+          export ANDROID_SDK_ROOT=$(pwd)/cmdline-tools
+          yes | $ANDROID_SDK_ROOT/bin/sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT
+          $ANDROID_SDK_ROOT/bin/sdkmanager --install "platforms;android-31" "platform-tools" "build-tools;31.0.0" --sdk_root=$ANDROID_SDK_ROOT
+          $ANDROID_SDK_ROOT/bin/sdkmanager --install "ndk;23.1.7779620" --sdk_root=$ANDROID_SDK_ROOT
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/23.1.7779620" >> $GITHUB_ENV
+
+      - name: Cache Qt source code
+        id: cache-qt-code
+        uses: actions/cache@v3
+        with:
+          path: qt6
+          key: ${{ runner.os }}-qt-code
+
+      - name: "Get Qt source code"
+        if: steps.cache-qt-code.outputs.cache-hit != 'true'
+        run: |
+          git clone --branch 6.4 https://code.qt.io/qt/qt5.git qt6
+          cd qt6
+          perl init-repository --module-subset=qtbase,qtsensors
+
+      - name: Cache Qt host build
+        id: cache-qt-host
+        uses: actions/cache@v3
+        with:
+          path: qt-host
+          key: ${{ runner.os }}-qt-host
+
+      - name: "Build host Qt"
+        if: steps.cache-qt-host.outputs.cache-hit != 'true'
+        run: |
+          installdir=$(pwd)
+          cd qt6
+          mkdir qt6-host
+          cd qt6-host
+          ../configure -prefix $installdir/qt-host 
+          cmake --build . --parallel $(nproc)
+          cmake --install .
+
+      - name: Cache Qt android build
+        id: cache-qt-android
+        uses: actions/cache@v3
+        with:
+          path: qt-android
+          key: ${{ runner.os }}-qt-android
+
+      - name: "Build android Qt"
+        if: steps.cache-qt-android.outputs.cache-hit != 'true'
+        run: |
+          installdir=$(pwd)
+          cd qt6
+          mkdir qt6-android
+          cd qt6-android
+          ../configure ANDROID_PLATFORM=31 -platform android-clang -prefix $installdir/qt-android -android-ndk ${{ env.ANDROID_NDK_ROOT }} -android-sdk ${{ env.ANDROID_SDK_ROOT }} -android-abis arm64-v8a -qt-host-path $installdir/qt-host
+          cmake --build . --parallel $(nproc)
+          cmake --install .
+
+      - name: "Configure AndroidGamepad"
+        run: |
+          installdir=$(pwd)
+          mkdir build
+          cd build
+          $installdir/qt-android/bin/qmake ../AndroidGamepad.pro
+
+      - name: "Build AndroidGamepad"
+        run: |
+          cd build
+          make -j $(nproc) apk
+          mv android-build/build/outputs/apk/debug/android-build-debug.apk ../AndroidGamepad.apk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: AndroidGamepad-arm64.zip
+          path: ./AndroidGamepad.apk
