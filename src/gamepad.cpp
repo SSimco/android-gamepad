@@ -201,8 +201,8 @@ void Gamepad::disableGyro() {
   m_accelerometer.stop();
   m_gyroscope.stop();
   QByteArray byteArray;
-  append(byteArray,
-         std::make_tuple(qToUnderlying(InputType::gyro), 0, 0, 0, 0, 0, 0));
+  append(byteArray, std::make_tuple(qToUnderlying(InputType::gyro), 0.f, 0.f,
+                                    0.f, 0.f, 0.f, 0.f));
   m_sendData(byteArray);
 }
 void Gamepad::sendGyroData() {
@@ -211,12 +211,12 @@ void Gamepad::sendGyroData() {
     auto gyroReading = m_gyroscope.reading();
     if (accelReading && gyroReading) {
       QByteArray byteArray;
-      int accelX = accelReading->x();
-      int accelY = accelReading->y();
-      int accelZ = accelReading->z();
-      int gyroX = gyroReading->x();
-      int gyroY = gyroReading->y();
-      int gyroZ = gyroReading->z();
+      float accelX = accelReading->x();
+      float accelY = accelReading->y();
+      float accelZ = accelReading->z();
+      float gyroX = gyroReading->x();
+      float gyroY = gyroReading->y();
+      float gyroZ = gyroReading->z();
 
       append(byteArray, std::make_tuple(qToUnderlying(InputType::gyro), accelX,
                                         accelY, accelZ, gyroX, gyroY, gyroZ));
